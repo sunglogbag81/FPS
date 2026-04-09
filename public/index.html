@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Multiplayer FPS - Graphics Upgrade</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #000; }
+        #blocker { position: absolute; width: 100%; height: 100%; background-color: rgba(0,20,30,0.8); display: flex; justify-content: center; align-items: center; color: #0ff; cursor: pointer; z-index: 10; flex-direction: column; }
+        
+        /* 네온 스타일 텍스트 */
+        h1 { font-size: 50px; text-shadow: 0 0 10px #0ff, 0 0 20px #0ff; margin-bottom: 10px; }
+        p { color: #aaa; }
+
+        /* 크로스헤어: FPS 느낌 강화 */
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: #0ff; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 5px #0ff; }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(0, 255, 255, 0.5); }
+        #crosshair::before { top: -10px; left: 1px; width: 2px; height: 8px; }
+        #crosshair::after { top: 6px; left: 1px; width: 2px; height: 8px; }
+        #crosshair-left { position: absolute; top: 50%; left: calc(50% - 10px); width: 8px; height: 2px; background: rgba(0, 255, 255, 0.5); transform: translateY(-50%); pointer-events: none; }
+        #crosshair-right { position: absolute; top: 50%; left: calc(50% + 4px); width: 8px; height: 2px; background: rgba(0, 255, 255, 0.5); transform: translateY(-50%); pointer-events: none; }
+
+        /* 사이버펑크 스타일 체력바 */
+        #hp-ui { position: absolute; bottom: 30px; left: 30px; color: #0ff; font-size: 28px; font-weight: bold; text-shadow: 0 0 8px #0ff; pointer-events: none; }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div id="hp-ui">HP: 100</div>
+    <div id="crosshair"></div>
+    <div id="crosshair-left"></div>
+    <div id="crosshair-right"></div>
+    <div id="blocker">
+        <h1>[ SYSTEM READY ]</h1>
+        <p>클릭하여 접속 | W A S D 이동 | SPACE 점프 | 좌클릭 사격</p>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
