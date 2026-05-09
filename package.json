@@ -1,12 +1,19 @@
 {
-  "name": "my-fps-game",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "neon-arena-fps",
+  "version": "2.0.0",
+  "description": "A stable multiplayer browser FPS built with Three.js, Express, and Socket.IO.",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --input-type=module --check < public/main.js"
   },
-  "keywords": [],
+  "keywords": [
+    "fps",
+    "threejs",
+    "socket.io",
+    "multiplayer"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
