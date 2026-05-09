@@ -19,6 +19,10 @@ const PLAYER_RADIUS = 0.55;
 const MAX_SHOT_DISTANCE = 120;
 const DAMAGE = 25;
 const RESPAWN_MS = 1200;
+const BOT_COUNT = Number(process.env.BOT_COUNT || 6);
+const BOT_FIRE_COOLDOWN_MS = 850;
+const BOT_AGGRO_RANGE = 55;
+const BOT_SPEED = 0.42;
 
 const map = {
   worldSize: WORLD_SIZE,
@@ -46,6 +50,7 @@ const map = {
 
 const players = new Map();
 let spawnIndex = 0;
+let botSeq = 0;
 
 function now() {
   return Date.now();
@@ -74,6 +79,7 @@ function publicPlayer(player) {
     score: player.score,
     deaths: player.deaths,
     alive: player.alive,
+    isBot: Boolean(player.isBot),
   };
 }
 
@@ -167,6 +173,153 @@ function respawn(player) {
   io.emit('playerRespawned', publicPlayer(player));
 }
 
+
+function damagePlayer(target, attacker, t) {
+  if (!target || !target.alive || target.invulnerableUntil >= t) return false;
+  target.hp = Math.max(0, target.hp - DAMAGE);
+
+  if (!target.isBot) {
+    io.to(target.id).emit('damaged', { hp: target.hp, by: attacker.id });
+  }
+
+  if (target.hp <= 0) {
+    target.alive = false;
+    target.deaths += 1;
+    attacker.score += 1;
+    io.emit('playerKilled', { killer: publicPlayer(attacker), victim: publicPlayer(target) });
+    setTimeout(() => {
+      if (players.has(target.id)) respawn(target);
+    }, RESPAWN_MS);
+  } else {
+    io.emit('playerUpdated', publicPlayer(target));
+  }
+  io.emit('playerUpdated', publicPlayer(attacker));
+  return true;
+}
+
+function fireShot(player, dir) {
+  const t = now();
+  if (!player.alive || t - player.lastShotAt < 120) return;
+  player.lastShotAt = t;
+
+  const origin = { x: player.x, y: player.y + 0.35, z: player.z };
+  let nearest = { t: MAX_SHOT_DISTANCE, type: 'miss', id: null };
+
+  for (const obstacle of map.obstacles) {
+    const hitT = rayIntersectsAabb(origin, dir, obstacle);
+    if (hitT !== null && hitT < nearest.t) nearest = { t: hitT, type: 'wall', id: null };
+  }
+  for (const target of players.values()) {
+    if (target.id === player.id) continue;
+    const hitT = rayIntersectsPlayer(origin, dir, target);
+    if (hitT !== null && hitT < nearest.t) nearest = { t: hitT, type: 'player', id: target.id };
+  }
+
+  const end = {
+    x: origin.x + dir.x * nearest.t,
+    y: origin.y + dir.y * nearest.t,
+    z: origin.z + dir.z * nearest.t,
+  };
+
+  if (nearest.type === 'player') {
+    damagePlayer(players.get(nearest.id), player, t);
+  }
+
+  io.emit('shot', { shooterId: player.id, origin, end, hit: nearest });
+}
+
+function createBot() {
+  const spawn = pickSpawn();
+  const id = `bot-${++botSeq}`;
+  const bot = {
+    id,
+    name: `BOT-${botSeq}`,
+    ...spawn,
+    yaw: 0,
+    pitch: 0,
+    hp: 100,
+    score: 0,
+    deaths: 0,
+    alive: true,
+    isBot: true,
+    invulnerableUntil: now() + 1000,
+    lastShotAt: 0,
+    nextThinkAt: 0,
+    wanderAngle: Math.random() * Math.PI * 2,
+  };
+  players.set(id, bot);
+  io.emit('playerJoined', publicPlayer(bot));
+}
+
+function ensureBots() {
+  const current = [...players.values()].filter((player) => player.isBot).length;
+  for (let i = current; i < BOT_COUNT; i += 1) createBot();
+}
+
+function nearestHuman(bot) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const player of players.values()) {
+    if (player.isBot || !player.alive) continue;
+    const dist = Math.hypot(player.x - bot.x, player.z - bot.z);
+    if (dist < bestDist) {
+      best = player;
+      bestDist = dist;
+    }
+  }
+  return bestDist <= BOT_AGGRO_RANGE ? best : null;
+}
+
+function moveBot(bot, target) {
+  if (!bot.alive) return;
+  const t = now();
+  if (t >= bot.nextThinkAt) {
+    bot.nextThinkAt = t + 900 + Math.random() * 900;
+    bot.wanderAngle += (Math.random() - 0.5) * 1.8;
+  }
+
+  let dx = Math.cos(bot.wanderAngle);
+  let dz = Math.sin(bot.wanderAngle);
+  if (target) {
+    dx = target.x - bot.x;
+    dz = target.z - bot.z;
+  }
+  const len = Math.hypot(dx, dz) || 1;
+  dx /= len;
+  dz /= len;
+
+  const next = {
+    x: clamp(bot.x + dx * BOT_SPEED, -WORLD_SIZE / 2, WORLD_SIZE / 2),
+    z: clamp(bot.z + dz * BOT_SPEED, -WORLD_SIZE / 2, WORLD_SIZE / 2),
+  };
+  if (!map.obstacles.some((obstacle) => isPointInsideObstacle(next.x, next.z, obstacle))) {
+    bot.x = next.x;
+    bot.z = next.z;
+  } else {
+    bot.wanderAngle += Math.PI / 2;
+  }
+  bot.yaw = Math.atan2(dx, dz);
+}
+
+function tickBots() {
+  ensureBots();
+  for (const bot of players.values()) {
+    if (!bot.isBot) continue;
+    const target = nearestHuman(bot);
+    moveBot(bot, target);
+    if (!target || !bot.alive) continue;
+    const dist = Math.hypot(target.x - bot.x, target.z - bot.z);
+    if (dist > BOT_AGGRO_RANGE || now() - bot.lastShotAt < BOT_FIRE_COOLDOWN_MS) continue;
+    const aimNoise = 0.05;
+    const dir = normalizeDirection({
+      x: target.x - bot.x + (Math.random() - 0.5) * aimNoise * dist,
+      y: target.y - bot.y + (Math.random() - 0.5) * 0.22,
+      z: target.z - bot.z + (Math.random() - 0.5) * aimNoise * dist,
+    });
+    if (dir) fireShot(bot, dir);
+  }
+}
+
 io.on('connection', (socket) => {
   const spawn = pickSpawn();
   const player = {
@@ -205,51 +358,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('shoot', (data = {}) => {
-    const t = now();
-    if (!player.alive || t - player.lastShotAt < 120) return;
-    player.lastShotAt = t;
-
     const dir = normalizeDirection(data.dir);
-    if (!dir) return;
-    const origin = { x: player.x, y: player.y + 0.35, z: player.z };
-
-    let nearest = { t: MAX_SHOT_DISTANCE, type: 'miss', id: null };
-    for (const obstacle of map.obstacles) {
-      const hitT = rayIntersectsAabb(origin, dir, obstacle);
-      if (hitT !== null && hitT < nearest.t) nearest = { t: hitT, type: 'wall', id: null };
-    }
-    for (const target of players.values()) {
-      if (target.id === player.id) continue;
-      const hitT = rayIntersectsPlayer(origin, dir, target);
-      if (hitT !== null && hitT < nearest.t) nearest = { t: hitT, type: 'player', id: target.id };
-    }
-
-    const end = {
-      x: origin.x + dir.x * nearest.t,
-      y: origin.y + dir.y * nearest.t,
-      z: origin.z + dir.z * nearest.t,
-    };
-
-    if (nearest.type === 'player') {
-      const target = players.get(nearest.id);
-      if (target && target.alive && target.invulnerableUntil < t) {
-        target.hp = Math.max(0, target.hp - DAMAGE);
-        io.to(target.id).emit('damaged', { hp: target.hp, by: player.id });
-        if (target.hp <= 0) {
-          target.alive = false;
-          target.deaths += 1;
-          player.score += 1;
-          io.emit('playerKilled', { killer: publicPlayer(player), victim: publicPlayer(target) });
-          setTimeout(() => {
-            if (players.has(target.id)) respawn(target);
-          }, RESPAWN_MS);
-        } else {
-          io.emit('playerUpdated', publicPlayer(target));
-        }
-      }
-    }
-
-    io.emit('shot', { shooterId: player.id, origin, end, hit: nearest });
+    if (dir) fireShot(player, dir);
   });
 
   socket.on('disconnect', () => {
@@ -258,12 +368,15 @@ io.on('connection', (socket) => {
   });
 });
 
+ensureBots();
+
 setInterval(() => {
+  tickBots();
   io.emit('snapshot', snapshot());
 }, 1000 / TICK_RATE);
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, players: players.size });
+  res.json({ ok: true, players: players.size, bots: [...players.values()].filter((player) => player.isBot).length });
 });
 
 const PORT = process.env.PORT || 3000;

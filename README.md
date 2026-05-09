@@ -8,6 +8,7 @@ A stable multiplayer browser FPS made with Three.js, Express, and Socket.IO.
 - WASD movement, jump, sprint, mouse aim, click to shoot
 - Multiplayer synchronization with Socket.IO
 - Server-side player state, shooting validation, damage, kills, deaths, and respawn
+- Server-side bots that roam, chase players, shoot, die, and respawn
 - Deterministic arena map with collision obstacles
 - HUD, hit feedback, kill feed, and leaderboard
 
@@ -19,6 +20,12 @@ npm start
 ```
 
 Open <http://localhost:3000>.
+
+Optional bot count:
+
+```bash
+BOT_COUNT=10 npm start
+```
 
 ## Controls
 
